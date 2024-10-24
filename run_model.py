@@ -7,11 +7,7 @@ import jax.numpy as jnp
 import numpyro
 from numpyro.handlers import scope
 
-## from models.monthly_model_gamma import model #pooled factors
 from models.panel_nmf_model import model
-
-from models.trends import spline_trend, seasonal_trend, linear_trend, global_seasonal_trend
-from models.utils import missingness_adjustment
 from numpyro_to_draws_df_csv import dict_to_tidybayes
 
 import pandas as pd
@@ -31,13 +27,13 @@ placebo_state = None
 num_chains = 1
 def main(dist, outcome_type="births", cat_name="total", rank=5, normalize_deaths=True, missingness=True, 
          disp_param=1e-4, sample_disp=False, placebo_state = None, placebo_time = None, 
-         drop_dobbs=False, dobbs_donor_sensitivity=False, model_treated=False,
+         drop_dobbs=False, dobbs_donor_sensitivity=False, model_treated=False, results_file_suffix = "",
          num_chains=num_chains, num_warmup=1000, num_samples=1000):
     
     numpyro.set_host_device_count(num_chains)
     
     # df = pd.read_csv('data/dobbsbimonthlybirthsdeaths_7_16_24.csv')
-    df = pd.read_csv('data/dobbsbiannualbirthsdeaths_2024_09_16.csv')
+    df = pd.read_csv('data/dobbsbiannualbirthsdeaths_2024_10_23.csv')
     
     from clean_birth_data import prep_data, clean_dataframe, create_unit_placebo_dataset, create_time_placebo_dataset
     
@@ -141,17 +137,12 @@ def main(dist, outcome_type="births", cat_name="total", rank=5, normalize_deaths
     all_samples = params.merge(preds, left_on = ['.draw', '.chain'], right_on = ['.draw', '.chain'])
     results_df = pd.DataFrame(all_samples)
 
-    results_df.to_csv('results/{}_{}_{}_{}_{}.csv'.format(dist, "births" if outcome_type == "births" else "deaths",
-                                             cat_name, rank, 'biannual_rate_final')) 
-                                             
-        # 'results/{}_{}_{}_{}_{}.csv'.format(dist, "births" if outcome_type == "births" else "deaths",
-        #                                      cat_name, rank, 'disp'+'{:.0e}'.format(disp_param)) 
+    df.to_csv('results/df_{}.csv'.format(results_file_suffix))
 
-        # '{:.0e}'.format(disp_param)                                     
-        # 'results/{}_{}_{}_{}_{}.csv'.format(dist, "births" if outcome_type == "births" else "deaths",
-        #                                    cat_name, rank, placebo_state.lower().replace(' ', '_') + "_placebo")
-        #'results/{}_{}_{}_sample_disp.csv'.format(dist, cat_name, rank)
-    
+    results_df.to_csv(
+        'results/{}_{}_{}_{}_{}.csv'.format(dist, "mortality", cat_name, rank, results_file_suffix)
+    )
+
     
 if __name__ == '__main__':
     from clean_birth_data import subgroup_definitions
@@ -172,12 +163,6 @@ if __name__ == '__main__':
     missing_flags = [True]
     # disp_params = [1e-4, 1e-3]
     disp_params = [1e-4]
-    # placebo_states = ["California", "New York", "Pennsylvania", "Illinois", 
-    #                  "Michigan", "New Jersey", "Washington", "Texas,"]
-    # placebo_states = ["Alaska", "Arizona", "California", "Colorado", "Connecticut", "Delaware", "District of Columbia", "Florida", "Hawaii", 
-    #                     "Illinois", "Indiana", "Iowa", "Kansas", "Maine", "Maryland", "Massachusetts", "Michigan", "Minnesota",
-    #                     "Nebraska", "Nevada", "New Hampshire", "New Jersey", "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", 
-    #                     "Oregon", "Pennsylvania", "Rhode Island", "South Carolina", "Utah","Virginia", "Washington"]
     placebo_times = [None]
     placebo_states = [None]
     sample_disp = False
@@ -194,5 +179,6 @@ if __name__ == '__main__':
                                                 disp_param=i[4],
                                                 sample_disp=sample_disp, placebo_state=i[5], placebo_time = i[6], 
                                                 drop_dobbs=drop_dobbs, dobbs_donor_sensitivity=dobbs_donor_sensitivity, 
-                                                model_treated=True, num_chains=4, num_samples=2500, num_warmup=1000) for i in args)
+                                                results_file_suffix="main_analysis",
+                                                model_treated=True, num_chains=1, num_samples=1000, num_warmup=1000) for i in args)
     
