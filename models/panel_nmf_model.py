@@ -99,12 +99,9 @@ def model(
         with numpyro.plate('num_cats', K):
             category_treatment_effect = numpyro.sample('category_treatment_effect', dist.Normal(scale=treatment_category_scale))
         
-        #treatment_kt_tensor = numpyro.deterministic('tkt', jnp.zeros_like(control_idx_array))
-        #treatment_kt_tensor[~control_idx_array] = treatment_kt
-        #print(treatment_kt_tensor.shape)
-        te = numpyro.deterministic('te', jnp.zeros_like(control_idx_array, dtype=float).at[~control_idx_array].add(treatment_kt) + ((~control_idx_array) * state_treatment_effect[None, :, None] + (~control_idx_array) * category_treatment_effect[:, None, None] + + (~control_idx_array) * state_category_te[:, :, None]))
+        te = numpyro.deterministic('te', jnp.zeros_like(control_idx_array, dtype=float).at[~control_idx_array].add(treatment_kt) + ((~control_idx_array) * state_treatment_effect[None, :, None] + (~control_idx_array) * category_treatment_effect[:, None, None] + (~control_idx_array) * state_category_te[:, :, None]))
         mu = numpyro.deterministic('mu', f_all + te)
-        #mu = numpyro.deterministic('mu', f_all.at[~control_idx_array].add(treatment_kt) + (~control_idx_array) * state_treatment_effect[None, :, None] + (~control_idx_array) * category_treatment_effect[:, None, None])
+
     else:
         mu = numpyro.deterministic('mu', f_all)
     
@@ -121,12 +118,6 @@ def model(
         nb_disp = numpyro.deterministic("disp", nb_disp)
         dispersion = jnp.ones(D)/nb_disp #if outcome_dist == "NB" else None
     
-    # Do low-rank approximation of the proportion model so:
-    # \alpha_i, \alpha_k ~ \theta_i \theta_j where theta i,j are low rank factors drawn over time
-    # priors for theta (Beta distributions?)
-    # then use \alpha as concentration parameters in the Dirichlet
-    # mu ~ treatment_effect + observed
-    # each category is ~ mu * Dirichlet(\alpha_it, .. \alpha_ik)
     if y is not None:
 
         if model_treated:
@@ -157,11 +148,6 @@ def model(
         f = mu.reshape(-1)
         disp_obs = (dispersion[None, :, None] * jnp.ones_like(mu)).reshape(-1)
     
-    # Step 0: Rerun poisson with the updated priors. 
-    # Step 1: compare nb_disp = very small and explicit Poisson parameterization
-    # Step 2: change nb_disp manually
-    # Step 3: run with PC prior (think about how to set sampling, Uniform?)
-    # Step 4: Fix joint consistency issue with proportional parameterization
     if outcome_dist == "Poisson":
         obs = numpyro.sample(
             'y_obs',
