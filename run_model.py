@@ -33,7 +33,7 @@ def main(dist, outcome_type="births", cat_name="total", rank=5, normalize_deaths
     numpyro.set_host_device_count(num_chains)
     
     # df = pd.read_csv('data/dobbsbimonthlybirthsdeaths_7_16_24.csv')
-    df = pd.read_csv('data/dobbsbiannualbirthsdeaths_2024_10_23.csv')
+    df = pd.read_csv('data/dobbs_biannual_data.csv')
     
     from clean_birth_data import prep_data, clean_dataframe, create_unit_placebo_dataset, create_time_placebo_dataset
     
@@ -153,8 +153,8 @@ if __name__ == '__main__':
     from joblib import Parallel, delayed
 
     # Define the inputs for the function
-    # inputs = [1, 2, 3, 4, 5, 6]
-    inputs = [2, 3]
+    inputs = [1, 2, 3, 4, 5, 6]
+    # inputs = [2, 3]
     #inputs = [7, 8, 10]
     # inputs = [7]
     outcome_type = "deaths"
