@@ -53,10 +53,8 @@ def model(
                 raw_time_factor = jnp.log(numpyro.sample('time_fac', 
                         dist.Gamma(time_fac_alpha, time_fac_alpha)
                         ))
-        cat_fe =  jnp.log(numpyro.sample('cat_fe', dist.ImproperUniform(constraints.positive, (), ()))).T
-        state_fe_scale = numpyro.sample('state_fe_scale', dist.HalfNormal(scale=1))
         with numpyro.plate('D', D):
-            state_fe = numpyro.sample('state_fe', dist.Normal(scale=state_fe_scale)).T
+            state_fe = numpyro.sample('state_fe', dist.ImproperUniform(constraints.positive, (), ()))).T
         
         with numpyro.plate('N', N):
             time_fe = jnp.log(numpyro.sample('time_fe',
@@ -70,7 +68,6 @@ def model(
 
     # create fixed effects, accounting for dimensions of each and broadcasting apropriately
     fixed_effects = (
-        cat_fe[:, None, None] + 
         state_fe[:, :, None] 
         + time_fe[:, None, :]
     )
