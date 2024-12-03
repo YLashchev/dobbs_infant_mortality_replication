@@ -54,7 +54,7 @@ def model(
                         dist.Gamma(time_fac_alpha, time_fac_alpha)
                         ))
         with numpyro.plate('D', D):
-            state_fe = numpyro.sample('state_fe', dist.ImproperUniform(constraints.positive, (), ()))).T
+            state_fe = numpyro.sample('state_fe', dist.ImproperUniform(constraints.positive, (), ())).T
         
         with numpyro.plate('N', N):
             time_fe = jnp.log(numpyro.sample('time_fe',
