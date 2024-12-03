@@ -16,7 +16,6 @@ dist = "Poisson"
 outcome_type = "deaths"
 cat_name = "race"
 rank = 5
-drop_dobbs = False
 sample_disp = False
 missingness=True
 disp_param = 1e-4
@@ -27,18 +26,18 @@ placebo_state = None
 num_chains = 1
 def main(dist, outcome_type="births", cat_name="total", rank=5, normalize_deaths=True, missingness=True, 
          disp_param=1e-4, sample_disp=False, placebo_state = None, placebo_time = None, 
-         drop_dobbs=False, dobbs_donor_sensitivity=False, model_treated=False, results_file_suffix = "",
+         end_date = '2024-01-01', dobbs_donor_sensitivity=False, model_treated=False, results_file_suffix = "",
          num_chains=num_chains, num_warmup=1000, num_samples=1000):
     
     numpyro.set_host_device_count(num_chains)
     
-    # df = pd.read_csv('data/dobbsbimonthlybirthsdeaths_7_16_24.csv')
-    df = pd.read_csv('data/dobbs_biannual_data.csv')
+    df = pd.read_csv('data/dobbsbiannualbirthsdeaths_11_08_24.csv')
+    # df = pd.read_csv('data/dobbs_biannual_data.csv')
     
     from clean_birth_data import prep_data, clean_dataframe, create_unit_placebo_dataset, create_time_placebo_dataset
     
     df = clean_dataframe(df, outcome_type, cat_name, csv_filename=None, 
-                         drop_dobbs=drop_dobbs, dobbs_donor_sensitivity=dobbs_donor_sensitivity)
+                         end_date=end_date, dobbs_donor_sensitivity=dobbs_donor_sensitivity)
     
     if placebo_state is not None and placebo_state != "Texas":
         df = create_unit_placebo_dataset(df, placebo_state = placebo_state)
@@ -60,12 +59,6 @@ def main(dist, outcome_type="births", cat_name="total", rank=5, normalize_deaths
     if(~normalize_deaths):
         data_dict_cat['denominators'] = np.ones(data_dict_cat['denominators'].shape)
     
-    print(df.time.min())
-    print(df.time.max())
-    print(data_dict_cat['Y'].shape)
-    print(data_dict_cat['denominators'].shape)
-    print(data_dict_cat['control_idx_array'].shape)
-
     data_dict_cat['control_idx_array']
 
     data_dict_cat['variables']
@@ -75,8 +68,6 @@ def main(dist, outcome_type="births", cat_name="total", rank=5, normalize_deaths
     from jax import random
     from numpyro.infer import MCMC, NUTS, Predictive
     from statsmodels.tsa.deterministic import CalendarFourier
-
-    #from models.monthly_model import monthly_model
 
     # set the random seed
     rng_key = random.PRNGKey(8675309)
@@ -166,7 +157,7 @@ if __name__ == '__main__':
     placebo_times = [None]
     placebo_states = [None]
     sample_disp = False
-    drop_dobbs = False
+    end_date = '2024-01-01'
     dobbs_donor_sensitivity = False
     normalize_deaths = True
 
@@ -178,7 +169,7 @@ if __name__ == '__main__':
                                                 missingness=i[3], 
                                                 disp_param=i[4],
                                                 sample_disp=sample_disp, placebo_state=i[5], placebo_time = i[6], 
-                                                drop_dobbs=drop_dobbs, dobbs_donor_sensitivity=dobbs_donor_sensitivity, 
+                                                end_date=end_date, dobbs_donor_sensitivity=dobbs_donor_sensitivity, 
                                                 results_file_suffix="main_analysis",
-                                                model_treated=True, num_chains=1, num_samples=1000, num_warmup=1000) for i in args)
+                                                model_treated=True, num_chains=4, num_samples=250, num_warmup=1000) for i in args)
     

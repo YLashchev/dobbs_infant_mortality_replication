@@ -34,7 +34,7 @@ subgroup_definitions = {
 }
 
 def clean_dataframe(dat:pd.DataFrame, outcome_type="births", cat_name="total", 
-                    csv_filename='data/dat_quarterly.csv', drop_dobbs=False, 
+                    csv_filename='data/dat_quarterly.csv', end_date='2024-01-1',
                     dobbs_donor_sensitivity=False):
     """
     Filters, imputes, and adds relevant columns to the dataframe
@@ -92,8 +92,8 @@ def clean_dataframe(dat:pd.DataFrame, outcome_type="births", cat_name="total",
     # Convert 'time' column to datetime if it's not already
     dat['time'] = pd.to_datetime(dat['time'])
 
-    # Filter the DataFrame to keep rows with time before 2024-12-01
-    dat = dat[dat['time'] < pd.to_datetime('2024-01-01')]
+    # Filter the DataFrame to keep rows with time before end_date
+    dat = dat[dat['time'] < pd.to_datetime(end_date)]
 
     ## States where abortion was banned in July 2022 include Alabama, Arkansas, Mississippi, Missouri, Oklahoma, South Dakota, 
     # Texas, West Virginia, and Wisconsin. Kentucky and Louisiana banned abortion in August and Idaho and Tennessee 
@@ -171,13 +171,6 @@ def clean_dataframe(dat:pd.DataFrame, outcome_type="births", cat_name="total",
     if cat_name == "marital":
         dat = dat[dat["state"] != "California"]
     
-    # # Drop Vermont, Wyoming and Montana for mortality
-    # if outcome_type == "deaths":
-    #     dat = dat[~dat["state"].isin(["Vermont", "Wyoming", "Montana"])]
-    
-    if drop_dobbs:
-        dat = dat[~(dat["state"].isin(states_with_ban) & (dat["state"] != 'Texas'))]
-
     if dobbs_donor_sensitivity:
         sensitivity_states = dat[~dat["dobbscode_sensitivity"].isna()]['state'].unique()
         sensitivity_states = [state for state in sensitivity_states if state not in ['Arizona', 'Pennsylvania', 'Florida', 'California']]
