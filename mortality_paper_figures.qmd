@@ -1,12 +1,4 @@
 ---
-params:
-  type: "race"
-  model_rank: NA
-  csv_prefix: "~/Downloads/joint_bimonthly_results/joint_bimonthly_gamma_overdispersed"
-  suffix: NA 
-  sensitivity: FALSE
-  model_fits_file: "dobbs_birth_fits.csv"
-  placebo_time: NA
 title: "Effects of Abortion Bans - `r params$type` analysis - rank `r params$model_rank`"
 author: Alex Franks
 format: 
@@ -31,10 +23,11 @@ library(jsonlite)
 library(kableExtra)
 library(gt)
 
+suffix <- "main_analysis"
+fig_suffix <- ""
 
-
-df <- read_csv("data/dobbsbiannualbirthsdeaths_2024_09_16.csv")
-aggregations <- read_csv("data/dobbsbiannualdeaths_aggregations.csv")
+df <- read_csv(sprintf("results/df_%s.csv", suffix))
+aggregations <- read_csv("data/dobbs_aggregate_data.csv")
 
 df$time <- paste(df$year, df$bacode * 6 - 5, "01", sep="-") %>% ymd()
 aggregations$time <- paste(aggregations$year, aggregations$bacode * 6 - 5, "01", sep="-") %>% ymd()
@@ -86,10 +79,67 @@ agg_births <- df %>% select(state, year, bacode, time, starts_with("births"), ex
 agg_deaths <- df %>% select(-starts_with("births")) %>% 
     filter(state == "Texas") %>% bind_rows(aggregations %>% mutate(state = expcat)) %>% 
     pivot_longer(cols=starts_with("deaths"), names_pattern = "deaths_(.*)", names_to="category", values_to="deaths") %>%
-    select(time, category, deaths, state) %>%
+    select(time, category, deaths, state, exposed_infdeaths) %>%
     mutate(state = recode(state, "exp"="Exposed (excl. Texas)", "Texas"="Texas", "unexp"="Unexposed"))
 
 agg_df <- left_join(agg_deaths, agg_births, by=c("state", "time", "category"))
+
+agg_df_total <- agg_df %>% mutate(mortality_rate = deaths / births * 1000) %>%
+  filter(category == "total") %>%
+  mutate(ban = (time >= "2022-07-01") & (state == "Texas") | 
+               (time >= "2023-01-01") & (state == "Exposed (excl. Texas)"))
+
+
+
+agg_df_total <- agg_df_total %>% arrange(time)
+
+
+## span = 0.5
+smooth_texas <- predict(loess(mortality_rate ~ as.numeric(time), data = agg_df_total %>% filter(state == "Texas") %>% arrange(time), span=0.5))
+smooth_unexposed <- predict(loess(mortality_rate ~ as.numeric(time), data = agg_df_total %>% filter(state == "Unexposed") %>% arrange(time), span=0.5))
+smooth_exposed <- predict(loess(mortality_rate ~ as.numeric(time), data = agg_df_total %>% filter(state == "Exposed (excl. Texas)") %>% arrange(time), span=0.5))
+
+
+agg_df_total$smooth <- numeric(nrow(agg_df_total))
+
+agg_df_total$smooth[agg_df_total$state == "Texas"] <- smooth_texas
+agg_df_total$smooth[agg_df_total$state == "Exposed (excl. Texas)"] <- smooth_exposed
+agg_df_total$smooth[agg_df_total$state == "Unexposed"] <- smooth_unexposed
+
+
+tmp_tx <- agg_df_total %>% filter(state == "Texas", time == "2022-07-01")
+tmp_tx$ban = FALSE
+tmp_exp <- agg_df_total %>% filter(state == "Exposed (excl. Texas)", time == "2023-01-01")
+tmp_exp$ban = FALSE
+agg_df_total <- bind_rows(agg_df_total, tmp_tx, tmp_exp)
+agg_df_total <- agg_df_total %>% arrange(time)
+
+agg_df_total %>%
+  ggplot() + 
+  geom_smooth(aes(x=time, y=mortality_rate, col=state), span=0.5, se=FALSE) + 
+  geom_line(aes(x=time, y=mortality_rate, col=state), alpha=0.5) +
+  theme_bw(base_size=16) + 
+  theme(legend.position = c(0.99, 0.99), legend.justification = c(1, 1),
+  #legend.background = element_blank(),  # Make legend background transparent
+  legend.title = element_blank()  ) +
+  scale_color_manual(values=c("red", "orange", "dark gray"),
+                      labels=c("States with bans (excl. Texas)", "Texas", "States without bans")) + 
+                
+  ylab("Infant Mortality Rate (per 1000 live births)") + xlab("Year") +
+  scale_x_date(
+      date_breaks = "1 year",  # Set axis labels at yearly intervals
+      date_labels = "%Y",
+      limits=c(as.Date("2012-01-01"), as.Date("2023-08-01"))
+  ) + guides(linetype="none") +
+  geom_vline(xintercept=lubridate::date("2022-01-01"), color="orange", linetype="dashed") +
+  geom_vline(xintercept=lubridate::date("2023-01-01"), color="red", linetype="dashed") +
+  geom_text(x=lubridate::date("2022-02-01"), y=6.2, label="Texas exposure in effect", vjust=1, 
+  angle=90, color="orange", size=2.5) + 
+  geom_text(x=lubridate::date("2023-02-01"), y=6.4, label="Other exposures in effect", vjust=1, 
+  angle=90, color="red", size = 2.5) +
+  coord_cartesian(xlim=c(as.Date("2012-04-01"), as.Date("2023-04-01")))
+
+ggsave(sprintf("figs/%smain_figures/absolute_mortality.png", fig_suffix), width=8, height=5)
 
 
 
@@ -102,12 +152,13 @@ relative_mortality_rate <- agg_df %>%
 relative_mortality_rate %>% filter(category == "total") %>% 
     ggplot() + 
     geom_smooth(aes(x=time, y=relative_mr, group=state, col=state), se=FALSE) + 
-    geom_jitter(aes(x=time, y=relative_mr, col=state), height=0, alpha=0.5) +
+    geom_point(aes(x=time, y=relative_mr, col=state), height=0, alpha=0.5) +
     theme_bw(base_size=16) + 
     theme(legend.position = c(0.99, 0.99), legend.justification = c(1, 1),
     #legend.background = element_blank(),  # Make legend background transparent
     legend.title = element_blank()  ) +
-    scale_color_manual(values=c("red", "orange", "dark gray")) + 
+    scale_color_manual(values=c("red", "orange", "dark gray"),
+                       labels=c("Banned States (excl. Texas)", "Texas", "Non-banned States")) + 
     ylab("Relative Infant Mortality Rate") + xlab("Year") + 
     geom_vline(xintercept=lubridate::date("2022-01-01"), color="orange", linetype="dashed") +
     geom_vline(xintercept=lubridate::date("2023-01-01"), color="red", linetype="dashed") +
@@ -115,12 +166,12 @@ relative_mortality_rate %>% filter(category == "total") %>%
         date_breaks = "1 year",  # Set axis labels at yearly intervals
         date_labels = "%Y"       # Format the labels to show the year
     ) 
-ggsave("~/Dropbox/abortion_results_and_data/mortality_figures/relative_mortality.png", width=8, height=5)
+ggsave(sprintf("figs/%smain_figures/relative_mortality.png", fig_suffix), width=8, height=5)
 
 relative_mortality_rate %>%
     ggplot() + 
     geom_smooth(aes(x=time, y=relative_mr, group=state, col=state), se=FALSE) + 
-    geom_jitter(aes(x=time, y=relative_mr, col=state), height=0, alpha=0.5) +
+    geom_point(aes(x=time, y=relative_mr, col=state), height=0, alpha=0.5) +
     theme_bw(base_size=16) + 
     theme(legend.position = c(0.99, 0.99), legend.justification = c(1, 1),
     #legend.background = element_blank(),  # Make legend background transparent
@@ -130,7 +181,7 @@ relative_mortality_rate %>%
     geom_vline(xintercept=lubridate::date("2022-01-01"), color="orange", linetype="dashed") +
     geom_vline(xintercept=lubridate::date("2023-01-01"), color="red", linetype="dashed") +
     facet_wrap(~category, scales="free_y")
-ggsave("~/Dropbox/abortion_results_and_data/mortality_figures/relative_facet.png", width=14, height=10)
+ggsave(sprintf("figs/%smain_figures/relative_facet.png", fig_suffix), width=14, height=10)
 
 categories_list <- list(
     race = c("nhwhite", "nhblack", "hisp", "otherraceeth"),
@@ -159,7 +210,7 @@ df %>% select(time, state, starts_with("deaths"), ban) %>%
                     values_to="deaths") %>%
   group_by(category) %>% 
   summarize(count_missing = sum(is.na(deaths)), fraction_missing = round(100*count_missing / n(), 1)) %>%
-  mutate(state = "Ban States (excl. Texas)") -> frac_missing_ban_no_tx
+  mutate(state = "States with bans (excl. Texas)") -> frac_missing_ban_no_tx
 
 df %>% select(time, state, starts_with("deaths"), ban) %>% 
   filter(ban == 1) %>%                   
@@ -168,7 +219,7 @@ df %>% select(time, state, starts_with("deaths"), ban) %>%
                     values_to="deaths") %>%
   group_by(category) %>% 
   summarize(count_missing = sum(is.na(deaths)), fraction_missing = round(100*count_missing / n(), 1)) %>% 
-  mutate(state = "Ban States") -> frac_missing_ban_states
+  mutate(state = "States with bans") -> frac_missing_ban_states
 
 df %>% select(time, state, starts_with("deaths"), ban) %>% 
   filter(ban == 1) %>%                   
@@ -216,7 +267,7 @@ df %>% select(time, state, starts_with("deaths"), ban) %>%
    tab_style(style = cell_borders(sides = c("bottom"),  weight = px(1.5)),
             locations = cells_body(rows = c(14))) |>
    fmt_number(columns = total, decimals = 1) |>
-   gtsave("~/Dropbox/abortion_results_and_data/mortality_figures/supplement_figures/missing_data.png", zoom=4)
+   gtsave(sprintf("figs/%ssupplement_figures/missing_data.png", fig_suffix), zoom=4)
 
 
 ## Median infant death counts
@@ -230,7 +281,7 @@ agg_deaths %>% ungroup() %>%
   filter(state == "Exposed (excl. Texas)") %>%             
   group_by(category) %>% 
   summarize(count_missing = round(mean(deaths, na.rm=TRUE), 0)) %>%
-  mutate(state = "Ban States (excl. Texas)") -> median_deaths_ban_no_tx
+  mutate(state = "States with bans (excl. Texas)") -> median_deaths_ban_no_tx
 
 agg_deaths %>% ungroup() %>%
   filter(state == "Exposed (excl. Texas)" | state == "Texas") %>%
@@ -238,7 +289,7 @@ agg_deaths %>% ungroup() %>%
   summarize(count_missing = sum(deaths, na.rm=TRUE)) %>%
   group_by(category) %>% 
   summarize(count_missing = round(mean(count_missing, na.rm=TRUE), 0)) %>%
-  mutate(state = "Ban States") -> median_deaths_ban
+  mutate(state = "States with bans") -> median_deaths_ban
 
 
 df %>% select(time, state, starts_with("deaths"), ban) %>% 
@@ -291,7 +342,7 @@ df %>% select(time, state, starts_with("deaths"), ban) %>%
     align = "center",
     columns = -1
   ) |>
-   gtsave("~/Dropbox/abortion_results_and_data/mortality_figures/supplement_figures/median_death_counts.png", zoom=4)
+   gtsave(sprintf("figs/%ssupplement_figures/median_death_counts.png", fig_suffix), zoom=4)
 
 
 
@@ -301,9 +352,7 @@ df %>% select(time, state, starts_with("deaths"), ban) %>%
 source("plot_utilities.R")
 
 ## Load all datasets
-# file_dir <- "~/Downloads/hierarchy"
-file_dir <- "~/Dropbox/abortion_results_and_data/posterior_samples/pois_deaths_rate_final"
-suffix <- "biannual_rate_final"
+file_dir <- "results"
 types <- c("race", "total", "congenital", "neonatal")
 ranks <- c(2, 2, 3, 3)
 
@@ -314,10 +363,10 @@ for(i in 1:length(types)) {
     print(sprintf("%s %i", type, model_rank))
     
     categories <- categories_list[[type]]
-    type_samples <- read_csv(sprintf("%s/Poisson_deaths_%s_%i_%s.csv", file_dir, type, model_rank, suffix))
+    type_samples <- read_csv(sprintf("%s/Poisson_mortality_%s_%i_%s.csv", file_dir, type, model_rank, suffix))
 
-    ## Thinning
-    type_samples <- type_samples %>% filter(.draw %% 10 == 0)
+    ## Thinning for speeding things up, only for debugging
+    ## type_samples <- type_samples %>% filter(.draw %% 10 == 0)
 
     categories <- categories_list[[type]]
 
@@ -389,7 +438,7 @@ all_samples <- all_samples %>% mutate(category = fct_recode(category,
                                 )) %>% 
                                 mutate(category = fct_relevel(category,
                                 "Congenital", "Non-congenital", "Neonatal", "Non-neonatal",
-                                "Non-Hispanic White", "Non-Hispanic Black", "Hispanic", "Other",
+                                "Hispanic", "Non-Hispanic Black", "Non-Hispanic White", "Other",
                                 "Total"
                                 ))
 
@@ -412,18 +461,19 @@ scale_x_date(
 ) +   
 theme(
     plot.margin = margin(t = 10, r = 20, b = 10, l = 10)  # Extend the right margin
-)
-ggsave("~/Dropbox/abortion_results_and_data/mortality_figures/ban_states_fit_plot.png", width=8, height=5)
+) + ggtitle("Model Fit - All states with bans")
+ggsave(sprintf("figs/%smain_figures/ban_states_fit_plot.png", fig_suffix), width=8, height=5)
 
 make_gap_plot(quantiles_df %>% filter(type=="total"), state_name="Ban States", category="Total", target="deaths") + theme_bw(base_size=16) + 
 scale_x_date(
     date_breaks = "1 year",  # Set axis labels at yearly intervals
     date_labels = "%Y"       # Format the labels to show the year
 ) +   
+ggtitle("Gap Plot - All states with bans") +
 theme(
     plot.margin = margin(t = 10, r = 20, b = 10, l = 10)  # Extend the right margin
 )
-ggsave("~/Dropbox/abortion_results_and_data/mortality_figures/ban_states_gap_plot.png", width=8, height=5)
+ggsave(sprintf("figs/%smain_figures/ban_states_gap_plot.png", fig_suffix),width=8, height=5)
 ```
 
 ## Interval Plots
@@ -434,8 +484,9 @@ make_interval_plot(all_samples %>% filter(type == "race", category !="Total"),
                          target="deaths", denom="births",
                          rate_normalizer=1000,
                          estimand = "ratio", 
-                         method="mu") + labs(color="Race/Ethnicity")
-ggsave("~/Dropbox/abortion_results_and_data/mortality_figures/race_interval_plot.png", width=10, height=10)
+                         method="mu") + labs(color="Race and ethnicity") +
+                         facet_grid(factor(!(state %in% c("States w/ bans", "States w/ bans (excl. Texas)"))) ~ . , scales="free_y", space='free') + ggtitle("Race and ethnicity")
+ggsave(sprintf("figs/%smain_figures/race_interval_plot.png", fig_suffix), width=10, height=10)
 
 race_interval_agg <- make_interval_plot(
   all_samples %>% filter(type == "race", category !="Total"), 
@@ -445,7 +496,7 @@ race_interval_agg <- make_interval_plot(
                          estimand = "ratio", 
                          method="mu",
                          states = c("Ban States", "Ban States (excl. Texas)", "Texas")) + 
-                         labs(color="Race/Ethnicity") + ggtitle("Race/Ethnicity") + ylim(c(-5, 25))
+                         labs(color="Race and ethnicity") + ggtitle("Race and ethnicity") + ylim(c(-5, 25))
 
 
 make_interval_plot(all_samples %>% filter(type == "congenital", category !="Total"), 
@@ -453,8 +504,9 @@ make_interval_plot(all_samples %>% filter(type == "congenital", category !="Tota
                          target="deaths", denom="births",
                          rate_normalizer=1000,
                          estimand = "ratio", 
-                         method="mu") + labs(color="Congenital")
-ggsave("~/Dropbox/abortion_results_and_data/mortality_figures/congenital_interval_plot.png", width=10, height=10)
+                         method="mu") + labs(color="Congenital") + 
+                         facet_grid(factor(!(state %in% c("States w/ bans", "States w/ bans (excl. Texas)"))) ~ . , scales="free_y", space='free')
+ggsave(sprintf("figs/%smain_figures/congenital_interval_plot.png", fig_suffix), width=10, height=10)
 
 congenital_interval_agg <- make_interval_plot(all_samples %>% filter(type == "congenital", category !="Total"), 
                          group_var = c("state", "category"),
@@ -471,8 +523,9 @@ make_interval_plot(all_samples %>% filter(type == "neonatal", category !="Total"
                          target="deaths", denom="births",
                          rate_normalizer=1000,
                          estimand = "ratio", 
-                         method="mu") + labs(color="Neonatal")
-ggsave("~/Dropbox/abortion_results_and_data/mortality_figures/neonatal_interval_plot.png", width=10, height=10)
+                         method="mu") + labs(color="Neonatal") + 
+                         facet_grid(factor(!(state %in% c("States w/ bans", "States w/ bans (excl. Texas)"))) ~ . , scales="free_y", space='free')
+ggsave(sprintf("figs/%smain_figures/neonatal_interval_plot.png", fig_suffix), width=10, height=10)
 
 neonatal_interval_agg <- 
 make_interval_plot(all_samples %>% filter(type == "neonatal", category !="Total"), 
@@ -491,13 +544,40 @@ make_interval_plot(all_samples %>% filter(type == "total"),
                          target="deaths", denom="births",
                          rate_normalizer=1000,
                          estimand = "ratio", 
-                         method="mu") + labs(color="Total")
-ggsave("~/Dropbox/abortion_results_and_data/mortality_figures/total_interval_plot.png", width=10, height=10)
+                         method="mu") + labs(color="Total") + 
+                         facet_grid(factor(!(state %in% c("States w/ bans", "States w/ bans (excl. Texas)"))) ~ . , scales="free_y", space='free') + ggtitle("All Infant Deaths")
+ggsave(sprintf("figs/%smain_figures/total_interval_plot.png", fig_suffix), width=10, height=10)
 
+
+make_interval_plot(all_samples %>% filter(type == "race", category =="Non-Hispanic Black"), 
+                         group_var = c("state", "category"),
+                         target="deaths", denom="births",
+                         rate_normalizer=1000,
+                         estimand = "ratio", 
+                         method="mu") + labs(color="Race and ethnicity") +
+                         facet_grid(factor(!(state %in% c("States w/ bans", "States w/ bans (excl. Texas)"))) ~ . , scales="free_y", space='free') + ggtitle("Non-Hispanic Black Infant Deaths")
+ggsave(sprintf("figs/%smain_figures/black_interval_plot.png", fig_suffix), width=10, height=10)
+
+## All categories for banned states
+## Interval Plot For Table 1
+make_interval_plot(all_samples %>% 
+                   filter((type == "total" & category == "Total") | category != "Total") %>% 
+                   mutate(category = fct_rev(category), type=fct_rev(type)), 
+                   states = c("Ban States"),
+                   group_var = c("type", "category", "state"),
+                   target="deaths", denom="births",
+                   rate_normalizer=1000,
+                   estimand = "ratio", 
+                   method="mu", 
+                   color_group = "state",
+                   x_var = "category") + 
+                   labs(color="Total") + 
+                   facet_grid(type ~ ., scales="free_y", space='free') +
+                   theme(panel.spacing = unit(2, "lines"))
+ggsave(sprintf("figs/%smain_figures/ban_states_interval_plot.png", fig_suffix), width=10, height=6)
 
 race_interval_agg / congenital_interval_agg / neonatal_interval_agg
-ggsave("~/Dropbox/abortion_results_and_data/mortality_figures/agg_interval_plots.png", width=10, height=10)
-
+ggsave(sprintf("figs/%smain_figures/agg_interval_plot.png", fig_suffix), width=10, height=10)
 ```
 
 ## Table
@@ -505,11 +585,14 @@ ggsave("~/Dropbox/abortion_results_and_data/mortality_figures/agg_interval_plots
 ```{r tables}
 make_mortality_table <- function(merged_df, 
                        target_state = "Texas", target="deaths", denom="births",
-                       rate_normalizer=1000, plot_type="exploratory",
-                       tab_caption = "Table 1. Estimated difference in cumulative observed vs expected infant deaths (count and rate) in all states that banned abortion in months affected by bans, overall, by race, timing of death, and cause of death.") {
+                       rate_normalizer=1000, 
+                       tab_caption = "Table 1. Expected difference† in infant deaths (count and rate) in all states that banned abortion in months affected by bans, overall, by race, timing of death, and cause of death.") {
 
   if(target_state == "Ban States") {
-     # merged_df <- merged_df %>% filter(!state %in% c("Ban States", "Ban States (excl. Texas)"))
+     
+     ###################
+     ## Before 2023 Ban States is just Texas counts
+     ###################
      merged_df_tx <- merged_df %>% filter(state == "Texas")
      merged_df <- merged_df %>% filter(state == "Ban States")     
      merged_df[merged_df$time < "2023-01-01", c("deaths", "births", "ypred", "mu", "mu_treated")] <- merged_df_tx[merged_df_tx$time < "2023-01-01", c("deaths", "births", "ypred", "mu", "mu_treated")]
@@ -564,7 +647,7 @@ make_mortality_table <- function(merged_df,
     group_by(type, category) %>%
     summarize(
       ypred_mean = mean(ypred),
-      outcome = round(mean(outcome), digits=ifelse(mean(outcome < 1), 2, 0)),
+      outcome = round(mean(outcome), digits=ifelse(mean(outcome < 10), 2, 0)),
       outcome_diff_mean = round(mean(outcome_diff), digits=ifelse(mean(outcome < 1), 2, 0)), 
       outcome_diff_lower = round(quantile(outcome_diff, 0.025)), 
       outcome_diff_upper = round(quantile(outcome_diff, 0.975)),
@@ -592,6 +675,8 @@ make_mortality_table <- function(merged_df,
     mult_change_upper = causal_effect_ratio_upper)
 
   table_df <- table_df %>%
+    mutate(untreated_mean = round(untreated_mean, 0)) %>%
+    mutate(untreated_rate_mean = round(untreated_rate_mean, 2)) %>% 
     mutate(death_counts_str = paste0(outcome_diff_mean, " (", outcome_diff_lower, ", ", outcome_diff_upper, ")")) %>%
     mutate(death_rate_abs_str = paste0(rate_diff, " (", rate_diff_lower, ", ", rate_diff_upper, ")")) %>%
     mutate(death_rate_pct_str = paste0(round(100*(mult_change-1), 2), " (", round(100*(mult_change_lower-1), 2), ", ", round(100*(mult_change_upper-1), 2), ")")) %>%
@@ -601,11 +686,15 @@ make_mortality_table <- function(merged_df,
 
   pvals <- pval_rows <- table_df %>% pull(pval)
   pval_rows <- which(pvals < 0.05)
-  table_df <- table_df %>% mutate(category = paste0(category, ifelse(pval <= 0.05, "*", "")))
-  
+  table_df <- table_df %>% mutate(category = paste0(category, ifelse(rate_diff_lower > 0, "*", "")))
+
   table_df %>%
-    select(type, category, outcome, outcome_rate, death_counts_str, death_rate_abs_str, death_rate_pct_str) %>%
+    select(type, category, denom, outcome, outcome_diff_mean, outcome_rate, rate_diff, death_counts_str, death_rate_abs_str, death_rate_pct_str) %>%
+    mutate(expected_outcome = outcome - outcome_diff_mean, expected_rate = outcome_rate - rate_diff) %>%
     mutate(outcome = as.character(outcome)) %>%
+    select(-c("outcome_diff_mean", "rate_diff")) %>% 
+    mutate(outcome = ifelse(as.numeric(outcome) < 10, NA, outcome)) %>%
+    mutate(outcome_rate = ifelse(is.na(outcome), NA, outcome_rate)) %>%
     gt(rowname_col = "category") |>
   tab_header(
     title = tab_caption
@@ -616,28 +705,31 @@ make_mortality_table <- function(merged_df,
     rows = type == "congenital"
   ) |>
   tab_row_group(
-    label = "Race/ethnicity",
+    label = "Race and ethnicity",
     rows = type == "race"
   ) |>
   tab_row_group(
     label = "Timing",
     rows = type == "neonatal"
   ) |>
-  row_group_order(groups = c(NA, "Race/ethnicity", "Timing",
+  row_group_order(groups = c(NA, "Race and ethnicity", "Timing",
                              "Cause of death")) |>
   ### COLUMN OPERATIONS
   tab_spanner(
     label = "Infant mortality rate (per 1,000 live births)",
-    columns = c(outcome_rate, death_rate_abs_str, death_rate_pct_str)) |>
+    columns = c(outcome_rate, expected_rate, death_rate_abs_str, death_rate_pct_str)) |>
   tab_spanner(
     label = "Infant death count",
-    columns = c(outcome, death_counts_str)) |>
+    columns = c(outcome, expected_outcome, death_counts_str)) |>
   cols_label(
+    denom = "Births",
     outcome_rate = "Observed",
-    death_rate_abs_str = html("Difference from expected <br>(95% CI)"),
-    death_rate_pct_str = html("Percent change from expected<br>(95% CI)"),
+    expected_rate = "Expected",
+    death_rate_abs_str = html("Expected difference<br>(95% CI)"),
+    death_rate_pct_str = html("Expected percent change<br>(95% CI)"),
     outcome = "Observed",
-    death_counts_str = html("Difference from expected<br>(95% CI)"),
+    expected_outcome = "Expected",
+    death_counts_str = html("Expected difference<br>(95% CI)"),
     category = ""
   ) |>
   tab_stub_indent(
@@ -657,17 +749,29 @@ make_mortality_table <- function(merged_df,
              death_rate_pct_str ~ px(100),
              outcome_rate ~ px(50),
              death_counts_str ~ px(100),
-             outcome ~ px(50)) -> table_df_final
+             outcome ~ px(50),
+             denom ~ px(50),
+             expected_outcome ~ px(50),
+             expected_rate ~ px(50)) |> 
+  sub_missing() -> table_df_final
 
   table_df_final
 }
 
-ftab <- make_mortality_table(all_samples, target_state="Ban States") |> 
-        tab_footnote("Exposed months include January 2022 through December 2023 for Texas and January 2023 through December 2023 for other 13 states that banned abortion at 6 weeks or completely.")
-ftab |> gtsave("~/Dropbox/abortion_results_and_data/mortality_figures/ban_states_table.png", zoom=4)
+ftab <- make_mortality_table(all_samples, target_state="Ban States") 
+        # tab_footnote(html("Exposed months include January 2022 through December 2023 for Texas and January 2023 through December 2023 for other 13 states that banned abortion at 6 weeks or completely.<br>
+        # † Expected differences are computed using the Bayesian hierarchical panel data model described in the methods section. We report expected counts and rates as the observed count (or rate) minus the expected difference.
+        # The estimates for each row are computed using the same Bayesian model; note however that the expected percent change will not necessarily equal the percent change in expected(known as Jensen’s inequality).<br>
+        # * Categories for which the 95% credible intervals of the expected difference excludes zero."))
+ftab |> gtsave(sprintf("figs/%smain_figures/ban_states_table.png", fig_suffix), zoom=4)
 
-# ftab <- make_mortality_table(all_samples, target_state="Ban States (excl. Texas)")
-# ftab |> gtsave("~/Dropbox/abortion_results_and_data/mortality_figures/ban_states_excluded_tx_table.png", zoom=4)
+ftab <- make_mortality_table(all_samples, target_state="Ban States (excl. Texas)", 
+                             tab_caption = "Expected difference† in infant deaths (count and rate) in all states  excluding Texas that banned abortion in months affected by bans, overall, by race, timing of death, and cause of death.") 
+        # tab_footnote(html("Exposed months include January 2023 through December 2023 for the 13 states besides Texas that banned abortion at 6 weeks or completely.<br>
+        # † Expected differences are computed using the Bayesian hierarchical panel data model described in the methods section. We report expected counts and rates as the observed count (or rate) minus the expected difference.
+        # The estimates for each row are computed using the same Bayesian model; note however that the expected percent change will not necessarily equal the percent change in expected(known as Jensen’s inequality).<br>
+        # * Categories for which the 95% credible intervals of the expected difference excludes zero."))
+ftab |> gtsave(sprintf("figs/%ssupplement_figures/ban_states_no_texas_table.png", fig_suffix), zoom=4)
 
 # ftab <- make_mortality_table(all_samples, target_state="Texas")
 # ftab |> gtsave("~/Dropbox/abortion_results_and_data/mortality_figures/texas_table.png", zoom=4)
@@ -683,17 +787,20 @@ for(i in 1:length(treated_states)) {
   target_state <- treated_states[i]
 
   if(target_state == "Ban States (excl. Texas)"){
-    caption_string <- "all banned states excluding Texas"
+    caption_string <- "all states with bans excluding Texas"
   }
   else{
     caption_string <- target_state
   }
 
-  tab_caption = sprintf("Supplementary Table %i. Estimated difference in cumulative observed vs expected infant deaths (count and rate) in %s, from January 2023 through December 2023, overall and by socioeconomic characteristics", i, caption_string)
+  tab_caption = sprintf("Supplementary Table %i. Expected difference† in infant deaths (count and rate) in %s in months affected by bans, overall, by race, timing of death, and cause of death.", i, caption_string)
   
-  make_mortality_table(all_samples, target_state=target_state, tab_caption=tab_caption) |> 
-  tab_footnote("In the publicly available CDC Wonder data, cell counts between 1 and 9 are suppressed. Observed counts and rates therefore incorporate (mean) imputed infant deaths when observations are missing.") |>
-  gtsave(filename=sprintf("~/Dropbox/abortion_results_and_data/mortality_figures/supplement_figures/tables/%s_table.png", target_state), zoom=4)
+  make_mortality_table(all_samples, target_state=target_state, tab_caption=tab_caption) |>
+  tab_footnote(html("† Expected differences are computed using the Bayesian hierarchical panel data model described in the methods section. We report expected counts and rates as the observed count (or rate) minus the expected difference.
+        The estimates for each row are computed using the same Bayesian model; note however that the expected percent change will not necessarily equal the percent change in expected(known as Jensen’s inequality).<br>
+        * Categories for which the 95% credible intervals of the expected difference excludes zero. <br>
+        In the publicly available CDC Wonder data, cell counts between 1 and 9 are suppressed. Dash denotes these missing counts or rates; expected differences are still inferred via the Bayesian hierarchical model.")) |>
+  gtsave(filename=sprintf("figs/%ssupplement_figures/tables/%s_table.png", fig_suffix, target_state), zoom=4)
 
   make_state_fit_plot(quantiles_df %>% filter(type=="total"), state_name=target_state, category="Total", target="deaths") + 
   theme_bw(base_size=16) + ggtitle(paste("Model Fit -", target_state, sep=" ")) + 
@@ -704,9 +811,13 @@ for(i in 1:length(treated_states)) {
     theme(
         plot.margin = margin(t = 10, r = 20, b = 10, l = 10)  # Extend the right margin
     )
-  ggsave(filename=sprintf("~/Dropbox/abortion_results_and_data/mortality_figures/supplement_figures/fit_and_gap_plots/%s_fit_plot.png", target_state), width=8, height=5)
+  ggsave(filename=sprintf("figs/%ssupplement_figures/fit_and_gap_plots/%s_fit_plot.png", fig_suffix, target_state), width=8, height=5)
 
-  make_gap_plot(quantiles_df %>% filter(type=="total"), state_name=target_state, category="Total", target="deaths") + theme_bw(base_size=16) + ggtitle(paste("Gap Plot -", target_state, sep=" ")) +
+  make_gap_plot(quantiles_df %>% filter(type=="total"), 
+                state_name=target_state, category="Total", 
+                target="deaths") + 
+  theme_bw(base_size=16) + 
+  ggtitle(paste("Gap Plot -", target_state, sep=" ")) +
   scale_x_date(
     date_breaks = "1 year",  # Set axis labels at yearly intervals
         date_labels = "%Y"       # Format the labels to show the year
@@ -714,16 +825,188 @@ for(i in 1:length(treated_states)) {
     theme(
         plot.margin = margin(t = 10, r = 20, b = 10, l = 10)  # Extend the right margin
     )
-  ggsave(sprintf("~/Dropbox/abortion_results_and_data/mortality_figures/supplement_figures/fit_and_gap_plots/%s_gap_plot.png", target_state), width=8, height=5)
+  ggsave(sprintf("figs/%ssupplement_figures/fit_and_gap_plots/%s_gap_plot.png", fig_suffix, target_state), width=8, height=5)
 
 }
 
 ```
 
+## States Table
+
+```{r}
+make_state_table <- function(merged_df, 
+                       target_category = "Total", target="deaths", denom="births",
+                       rate_normalizer=1000, 
+                       tab_caption = "Table %i. Expected difference† in infant deaths (count and rate) in states that banned abortion in months affected by bans.",
+                       footnote_text="Exposed months include January 2022 through December 2023 for Texas and January 2023 through December 2023 for other 13 states that banned abortion at 6 weeks or completely.<br>
+        † Expected differences are computed using the Bayesian hierarchical panel data model described in the methods section. We report expected counts and rates as the observed count (or rate) minus the expected difference.
+        The estimates for each row are computed using the same Bayesian model; note however that the expected percent change will not necessarily equal the percent change in expected(known as Jensen’s inequality). States are ordered by expected percent change.<br>
+        * Categories for which the 95% credible intervals of the expected difference excludes zero.") {
+
+
+  merged_df_tx <- merged_df %>% filter(state == "Texas")
+
+  ## 2022-2023 "Texas is the only banned state, so all banned states is just Texas "
+  ban_states_indices <- (merged_df$time < "2023-01-01" & merged_df$state == "Ban States")
+  merged_df[ban_states_indices, c("deaths", "births", "ypred", "mu", "mu_treated")] <- 
+  merged_df_tx[merged_df_tx$time < "2023-01-01", c("deaths", "births", "ypred", "mu", "mu_treated")]
+  
+  # ban_states_no_tx_indices <- (merged_df$time < "2023-01-01" & merged_df$state == "Ban States (excl. Texas)")
+  # merged_df[ban_states_no_tx_indices, c("deaths", "births", "ypred", "mu", "mu_treated")] <-
+  # (merged_df_tx[merged_df_tx$time >= "2023-01-01", c("deaths", "births", "ypred", "mu", "mu_treated")] - 
+  # merged_df_tx[merged_df_tx$time >= "2023-01-01", c("deaths", "births", "ypred", "mu", "mu_treated")]
+
+
+  merged_df <- merged_df %>% filter(exposure_code == 1, category == target_category) %>% mutate(denom = births)
+
+  
+  table_df <- merged_df %>%
+    ungroup() %>%
+    ## Aggregate over time
+    group_by(state, .draw) %>%
+    summarize(
+      ypred = sum(ypred),
+      outcome = sum(ifelse(is.na(.data[[target]]), round(exp(mu)), .data[[target]])), 
+      treated = sum(exp(mu_treated)), untreated = sum(exp(mu)),
+      denom = sum(denom, na.rm = TRUE),
+      treated_rate = treated / denom * rate_normalizer,
+      untreated_rate = untreated / denom * rate_normalizer,
+      outcome_rate = round(outcome / denom * rate_normalizer, 2),
+      outcome_diff = round(treated - untreated)
+    ) %>%
+    ungroup() %>%
+    ## Compute quantiles of effects
+    group_by(state) %>%
+    summarize(
+      ypred_mean = mean(ypred),
+      outcome = round(mean(outcome), digits=ifelse(mean(outcome < 1), 2, 0)),
+      outcome_diff_mean = round(mean(outcome_diff), digits=ifelse(mean(outcome < 1), 2, 0)), 
+      outcome_diff_lower = round(quantile(outcome_diff, 0.025)), 
+      outcome_diff_upper = round(quantile(outcome_diff, 0.975)),
+      outcome_rate = mean(outcome_rate),
+      ypred_lower = quantile(ypred, 0.025), ypred_upper = quantile(ypred, 0.975),
+      treated_mean = mean(treated), treated_lower = quantile(treated, 0.025), treated_upper = quantile(treated, 0.975),
+      untreated_mean = mean(untreated), untreated_lower = quantile(untreated, 0.025), untreated_upper = quantile(untreated, 0.975),      
+      treated_rate_mean = mean(treated_rate), treated_rate_lower = quantile(treated_rate, 0.025), treated_rate_upper = quantile(treated_rate, 0.975),
+      untreated_rate_mean = mean(untreated_rate), untreated_rate_lower = quantile(untreated_rate, 0.025), untreated_rate_upper = quantile(untreated_rate, 0.975), 
+      causal_effect_diff_mean = mean(treated_rate - untreated_rate), causal_effect_diff_lower = quantile(treated_rate - untreated_rate, 0.025), causal_effect_diff_upper = quantile(treated_rate - untreated_rate, 0.975),
+      causal_effect_ratio_mean = mean(treated_rate / untreated_rate), causal_effect_ratio_lower = quantile(treated_rate / untreated_rate, 0.025), causal_effect_ratio_upper = quantile(treated_rate / untreated_rate, 0.975),
+      denom = mean(denom),
+      pval = 2*min(mean(untreated_rate > treated_rate), mean(untreated < treated))
+     )
+    
+  table_df <- table_df %>%
+  mutate(
+    # ypred_mean_rate = ypred_mean / years / (denom / rate_normalizer),
+    outcome_rate = round(outcome_rate, 2),
+    rate_diff = round(causal_effect_diff_mean, 2),
+    rate_diff_lower = round(causal_effect_diff_lower, 2),
+    rate_diff_upper = round(causal_effect_diff_upper, 2),
+    mult_change = causal_effect_ratio_mean,
+    mult_change_lower = causal_effect_ratio_lower,
+    mult_change_upper = causal_effect_ratio_upper,
+    state = fct_reorder(as.factor(state), mult_change, .fun = median),
+    state = fct_recode(state, `States with bans` = "Ban States", `States with bans (excl. Texas)` = "Ban States (excl. Texas)")) %>%
+    arrange(desc(state))
+    
+  
+
+  table_df <- table_df %>%
+    mutate(untreated_mean = round(untreated_mean, 0)) %>%
+    mutate(untreated_rate_mean = round(untreated_rate_mean, 2)) %>% 
+    mutate(death_counts_str = paste0(outcome_diff_mean, " (", outcome_diff_lower, ", ", outcome_diff_upper, ")")) %>%
+    mutate(death_rate_abs_str = paste0(rate_diff, " (", rate_diff_lower, ", ", rate_diff_upper, ")")) %>%
+    mutate(death_rate_pct_str = paste0(round(100*(mult_change-1), 2), " (", round(100*(mult_change_lower-1), 2), ", ", round(100*(mult_change_upper-1), 2), ")")) %>%
+    ungroup()
+  
+  pvals <- pval_rows <- table_df %>% pull(pval)
+  pval_rows <- which(pvals < 0.05)
+  table_df <- table_df %>% mutate(state = paste0(state, ifelse(rate_diff_lower >= 0, "*", "")))
+  
+  table_df %>%
+    select(state, denom, outcome, outcome_diff_mean, outcome_rate, rate_diff, death_counts_str, death_rate_abs_str, death_rate_pct_str) %>%
+    mutate(expected_outcome = outcome - outcome_diff_mean, expected_rate = outcome_rate - rate_diff) %>%
+    mutate(outcome = as.character(outcome)) %>%
+    select(-c("outcome_diff_mean", "rate_diff")) %>% 
+    gt(rowname_col = "state") |>
+  tab_header(
+    title = tab_caption
+  ) |> 
+  ## ROW OPERATIONS
+  tab_row_group(
+    label = md("**Aggregated**"),
+    rows = str_detect(state, "States with bans")
+  ) |>
+  tab_row_group(
+    label = md("**States with bans**"),
+    rows = !str_detect(state, "States with bans")
+  ) |>
+  row_group_order(groups = c(md("**Aggregated**"), md("**States with bans**"))) |>
+
+  ### COLUMN OPERATIONS
+  tab_spanner(
+    label = "Infant mortality rate (per 1,000 live births)",
+    columns = c(outcome_rate, expected_rate, death_rate_abs_str, death_rate_pct_str)) |>
+  tab_spanner(
+    label = "Infant death count",
+    columns = c(outcome, expected_outcome, death_counts_str)) |>
+  cols_label(
+    denom = "Births",
+    outcome_rate = "Observed",
+    expected_rate = "Expected",
+    death_rate_abs_str = html("Expected difference<br>(95% CI)"),
+    death_rate_pct_str = html("Expected percent change<br>(95% CI)"),
+    outcome = "Observed",
+    expected_outcome = "Expected",
+    death_counts_str = html("Expected difference<br>(95% CI)"),
+  ) -> table_df
+  
+  ## Styling
+  table_df |>
+  tab_options(table.align = "left", heading.align = "left") |>
+  cols_align(align = "left") |>
+  cols_hide(state) |>
+  tab_options(table.font.size=8) |>
+  opt_vertical_padding(scale = 0.5) |>
+  cols_width(state ~ px(125),
+             death_rate_abs_str ~ px(100),
+             death_rate_pct_str ~ px(100),
+             outcome_rate ~ px(50),
+             death_counts_str ~ px(100),
+             outcome ~ px(50),
+             denom ~ px(50),
+             expected_outcome ~ px(50),
+             expected_rate ~ px(50)) -> table_df_final
+
+  table_df_final |> tab_footnote(html(footnote_text))
+}
+
+total_states_tab <- make_state_table(all_samples %>% filter(type == "total"),
+                    tab_caption = "Table 2. Expected difference† in total infant deaths (count and rate) split by states that banned abortion in months affected by bans.",
+                    footnote_text = "Exposed months include January 2022 through December 2023 for Texas and January 2023 through December 2023 for other 13 states that banned abortion at 6 weeks or completely.<br>
+        † Expected differences are computed using the Bayesian hierarchical panel data model described in the methods section. We report expected counts and rates as the observed count (or rate) minus the expected difference.
+        The estimates for each row are computed using the same Bayesian model; note however that the expected percent change will not necessarily equal the percent change in expected(known as Jensen’s inequality).<br>
+        * Categories for which the 95% credible intervals of the expected difference excludes zero.")
+                    
+total_states_tab |> gtsave(sprintf("figs/%smain_figures/states_table_total_deaths.png", fig_suffix), zoom=4)
+
+black_states_tab <- make_state_table(all_samples %>% filter(type == "race"),
+                                    target_category="Non-Hispanic Black",
+                                    tab_caption = "Table 3. Expected difference† in non-hispanic black infant deaths (count and rate) split by states that banned abortion in months affected by bans.",
+                                    footnote_text = "Exposed months include January 2022 through December 2023 for Texas and January 2023 through December 2023 for other 13 states that banned abortion at 6 weeks or completely.<br>
+                                    † Expected differences are computed using the Bayesian hierarchical panel data model described in the methods section. We report expected counts and rates as the observed count (or rate) minus the expected difference.
+                                    The estimates for each row are computed using the same Bayesian model; note however that the expected percent change will not necessarily equal the percent change in expected(known as Jensen’s inequality).<br>
+                                    * Categories for which the 95% credible intervals of the expected difference excludes zero.")
+
+black_states_tab |> gtsave(sprintf("figs/%smain_figures/states_table_black_deaths.png", fig_suffix), zoom=4)
+
+```
+
+
 ## PPC Figures
 
 ```{r}
-ppc_states <- c("Texas", "Ban States (excl. Texas)")
+ppc_states <- c("Texas", "States with bans (excl. Texas)")
 types <- c("race", "total", "congenital", "neonatal")
 for(t in types) {
 
@@ -735,25 +1018,29 @@ for(t in types) {
     all_samples_ppc <- all_samples
   }
 
+  all_samples_ppc <- all_samples_ppc %>% 
+    mutate(state = fct_recode(state, `States with bans` = "Ban States", 
+                                      `States with bans (excl. Texas)` = "Ban States (excl. Texas)")) 
+
   rmse_res <- make_rmse_ppc_plot(all_samples_ppc %>% filter(state %in% ppc_states, type == t), outcome="deaths")
-  ggsave(rmse_res$rmse_plt, filename=sprintf("~/Dropbox/abortion_results_and_data/mortality_figures/supplement_figures/ppc/%s_rmse_plot.png", t), width=10, height=figure_height)
+  ggsave(rmse_res$rmse_plt, filename=sprintf("figs/%ssupplement_figures/ppc/%s_rmse_plot.png", fig_suffix, t), width=10, height=figure_height)
 
   abs_res <- make_abs_res_ppc_plot(all_samples_ppc %>% filter(state %in% ppc_states, type == t), outcome="deaths")
-  ggsave(abs_res$max_plt, filename=sprintf("~/Dropbox/abortion_results_and_data/mortality_figures/supplement_figures/ppc/%s_abs_plot.png", t), width=10, height=figure_height)
+  ggsave(abs_res$max_plt, filename=sprintf("figs/%ssupplement_figures/ppc/%s_abs_plot.png", fig_suffix, t), width=10, height=figure_height)
 
   acf_ppc4 <- make_acf_ppc_plot(all_samples_ppc %>% filter(state %in% ppc_states, type == t),
                   lag=4, outcome="deaths") 
-  ggsave(acf_ppc4$acf_plt, filename=sprintf("~/Dropbox/abortion_results_and_data/mortality_figures/supplement_figures/ppc/%s_acf4_plot.png", t), width=10, height=figure_height)
+  ggsave(acf_ppc4$acf_plt, filename=sprintf("figs/%ssupplement_figures/ppc/%s_acf4_plot.png", fig_suffix, t), width=10, height=figure_height)
 
   acf_ppc2 <- make_acf_ppc_plot(all_samples_ppc %>% filter(state %in% ppc_states, type == t),
                   lag=2, outcome="deaths") 
-  ggsave(acf_ppc2$acf_plt, filename=sprintf("~/Dropbox/abortion_results_and_data/mortality_figures/supplement_figures/ppc/%s_acf2_plot.png", t), width=10, height=figure_height)
+  ggsave(acf_ppc2$acf_plt, filename=sprintf("figs/%ssupplement_figures/ppc/%s_acf2_plot.png", fig_suffix, t), width=10, height=figure_height)
 
   acf_ppc1 <- make_acf_ppc_plot(all_samples_ppc %>% filter(state %in% ppc_states, type == t), lag=1, outcome="deaths") 
-  ggsave(acf_ppc1$acf_plt, filename=sprintf("~/Dropbox/abortion_results_and_data/mortality_figures/supplement_figures/ppc/%s_acf1_plot.png", t), width=10, height=figure_height)
+  ggsave(acf_ppc1$acf_plt, filename=sprintf("figs/%ssupplement_figures/ppc/%s_acf1_plot.png", fig_suffix, t), width=10, height=figure_height)
 
   uc_ppcs_obj <- make_unit_corr_ppc_plot(all_samples_ppc %>% filter(type == t), outcome="deaths")
-  ggsave(uc_ppcs_obj$eval_plt, filename=sprintf("~/Dropbox/abortion_results_and_data/mortality_figures/supplement_figures/ppc/%s_unit_corr_plot.png", t), width=7, height=figure_height)
+  ggsave(uc_ppcs_obj$eval_plt, filename=sprintf("figs/%ssupplement_figures/ppc/%s_unit_corr_plot.png", fig_suffix, t), width=7, height=figure_height)
 
 }
 
@@ -775,14 +1062,14 @@ cor.test(state_mortality, state_fertility)
 
 ## MCMC Diagnostics
 
-all_samples %>% filter(!is.na(te), exposure_code == 1) %>% group_by(state, time, category) %>% summarize(es=coda::effectiveSize(te)) %>% pull(es) %>% min
+all_samples %>% filter(!is.na(te), exposure_code == 1) %>% group_by(state, time, category) %>% summarize(es=coda::effectiveSize(te)) %>% pull(es) %>% quantile(., c(0.025, 0.5, 0.975))
 
 ## Trace plots.
-all_samples %>% filter(exposure_code == 1, time=="2023-01-01") %>% ggplot(aes(x=.draw, y=te)) + geom_line(aes(color=as.factor(.chain))) + facet_wrap(~category) + theme_bw()
+all_samples %>% filter(exposure_code == 1, time=="2023-01-01") %>% filter(.chain %in% c(1,2)) %>% ggplot(aes(x=.iteration, y=te)) + geom_line(aes(color=as.factor(.chain)), alpha=0.5) + facet_wrap(~category) + theme_bw()
 
 ### Variance Decomposition
 
-cov_dat <- read_csv("~/Dropbox/abortion_results_and_data/data/dobbscovariates_2024_02_07.csv")
+cov_dat <- read_csv("data/dobbscovariates_2024_02_07.csv")
 
 ci_df <- all_samples %>% 
   filter(exposure_code == 1) %>% 
@@ -810,7 +1097,7 @@ race_ci_mean %>% group_by(state) %>% summarize(mean_residual= mean(residual)) %>
 
 race_ci_mean %>% group_by(state) %>% summarize(mean_residual= mean(residual)) %>% arrange(desc(mean_residual)) %>% 
 left_join(cov_dat, by="state") %>% select(state, mean_residual, median_time_post_dobbs) %>% ggplot(aes(x=median_time_post_dobbs, y=mean_residual)) + geom_point() + geom_label(aes(label=state)) + theme_bw(base_size=16) + ylab("Mean Residual") + xlab("Median Driving Time Post Dobbs") + geom_smooth(method="lm", se=FALSE)
-ggsave("~/Dropbox/abortion_results_and_data/mortality_figures/supplement_figures/driving_time.png")
+ggsave(sprintf("figs/%ssupplement_figures/driving_time.png", fig_suffix))
 
 
 race_ci_mean %>% group_by(state) %>% summarize(mean_caual= mean(residual)) %>% arrange(desc(mean_residual)) %>% 
