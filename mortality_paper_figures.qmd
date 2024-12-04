@@ -1051,18 +1051,90 @@ for(t in types) {
 ```
 
 
+## Event-Time Gap Plot
+
+```{r}
+all_samples %>% filter(ban==1, !(state %in% c("Ban States", "Ban States (excl. Texas)")), type=="total") %>% 
+  mutate(event_time = as.numeric(factor(time, levels=unique(time)))) %>%
+  group_by(state) %>% 
+  mutate(min_event_time = min(event_time[exposure_code == 1])) %>%
+  mutate(event_time = event_time - min_event_time) %>% 
+  ungroup() %>% 
+  group_by(event_time, .draw) %>% 
+  summarize(deaths = sum(deaths), births=sum(births), 
+            ypred = sum(ypred), mu = log(sum(exp(mu))), 
+            mu_treated = log(sum(exp(mu_treated)))) %>% 
+  ungroup() %>%
+  group_by(event_time) %>%
+  summarize(ypred_mean=mean(ypred), 
+            ypred_lower=quantile(ypred, 0.025), ypred_upper=quantile(ypred, 0.975), 
+            births=mean(births),
+            deaths = mean(deaths)) %>% 
+  ungroup() %>%
+  mutate(pre_ban = event_time < 0) -> event_time_df
+
+  event_time_df %>% write_csv("results/event_time_results.csv")
+
+  event_time_df %>%
+  ggplot() +
+    geom_ribbon(aes(
+      x = event_time,
+      ymax = log(deaths) - log(ypred_lower),
+      ymin = log(deaths) - log(ypred_upper),
+      group = pre_ban
+    ), alpha = 0.25) +
+    geom_line(aes(x = event_time, y = log(deaths) - log(ypred_mean), group=pre_ban), color = "red") +
+    theme_bw() +
+    geom_hline(yintercept = 0, col = "black", linetype = "dashed", alpha=0.75) +
+    xlab("Event Time")
+
+```
+
 ## Aggregation Computations for Paper
 ```{r}
+file.create("figs/main_figures/summaries_for_paper.txt", overwrite=TRUE)
 
-## Summaries based on fertility paper -- NEED TO UPDATE
-state_mortality <- c(6.2, 3.28, 2.27, 0.27, 7.49, 0.79, 1.95, -1.07, 4.71, 2, 2.02, 8.89, -1.77, 0.39)
-state_fertility <- c(1.09, 1.11, 0.91, 1.22, 1.44, 0.7, 1.25, 0.31, 1, 0.66, 1.05, 2.07, 0.78, 0.88)
-cor.test(state_mortality, state_fertility)
+## Summaries based on fertility paper
+mortality_expected_percent_change_total <- c(
+  Texas = 9.41,
+  Kentucky = 8.57,
+  Alabama = 6.93,
+  Oklahoma = 5.01,
+  Arkansas = 3.22,
+  Georgia = 2.01,
+  Tennessee = 1.87,
+  South_Dakota = 1.34,
+  Mississippi = 1.31,
+  Louisiana = -0.01,
+  Wisconsin = -0.11,
+  Idaho = -0.94,
+  Missouri = -2.26,
+  West_Virginia = -3.09
+)
 
-## w/out Texas
-state_mortality <- c(6.2, 3.28, 2.27, 0.27, 7.49, 0.79, 1.95, -1.07, 4.71, 2, 2.02, -1.77, 0.39)
-state_fertility <- c(1.09, 1.11, 0.91, 1.22, 1.44, 0.7, 1.25, 0.31, 1, 0.66, 1.05, 0.78, 0.88)
-cor.test(state_mortality, state_fertility)
+fertility_expected_percent_change_total <- c(
+  Texas = 2.9,
+  Kentucky = 1.64,
+  Alabama = 1.27,
+  Oklahoma = 1.36,
+  Arkansas = 1.11,
+  Georgia = 0.89,
+  Tennessee = 1.11,
+  South_Dakota = .63,
+  Mississippi = 1.6,
+  Louisiana = 1.2,
+  Wisconsin = .85,
+  Idaho = 0.73,
+  Missouri = -.56,
+  West_Virginia = .78
+)
+
+cor_test <- cor.test(mortality_expected_percent_change_total, fertility_expected_percent_change_total)
+
+write_lines("------ Correlation between inferred pct increase in fertility with inferred pct increase in mortality  ------ ", "figs/main_figures/summaries_for_paper.txt", append=TRUE)
+write_lines(sprintf("corr = %f, pval = %f", cor_test$estimate, cor_test$p.value), "figs/main_figures/summaries_for_paper.txt", append=TRUE)
+
+            
 
 ## MCMC Diagnostics
 
@@ -1070,6 +1142,13 @@ all_samples %>% filter(!is.na(te), exposure_code == 1) %>% group_by(state, time,
 
 ## Trace plots.
 all_samples %>% filter(exposure_code == 1, time=="2023-01-01") %>% filter(.chain %in% c(1,2)) %>% ggplot(aes(x=.iteration, y=te)) + geom_line(aes(color=as.factor(.chain)), alpha=0.5) + facet_wrap(~category) + theme_bw()
+
+## Post-Hoc IMR for those who would have received abortion but did not
+## 478 excess deaths
+## 20,323 excess births
+
+write_lines(sprintf("------ %i deaths over expectation divided by %i births over expectation * 1000 = %f Infant Mortality Rate for those seeking abortion who did not get one ------ ", 478, 20323, 478/20323 * 1000), 
+            "figs/main_figures/summaries_for_paper.txt", append=TRUE)
 
 ### Variance Decomposition
 
@@ -1104,7 +1183,7 @@ left_join(cov_dat, by="state") %>% select(state, mean_residual, median_time_post
 ggsave(sprintf("figs/%ssupplement_figures/driving_time.png", fig_suffix))
 
 
-race_ci_mean %>% group_by(state) %>% summarize(mean_caual= mean(residual)) %>% arrange(desc(mean_residual)) %>% 
+race_ci_mean %>% group_by(state) %>% summarize(mean_residual= mean(residual)) %>% arrange(desc(mean_residual)) %>% 
 left_join(cov_dat, by="state") %>% select(state, mean_residual, median_time_post_dobbs) %>% ggplot(aes(x=median_time_post_dobbs, y=mean_residual)) + geom_point() + geom_label(aes(label=state)) + theme_bw(base_size=16) + ylab("Mean Residual") + xlab("Median Driving Time Post Dobbs") + geom_smooth(method="lm", se=FALSE)
 
 
@@ -1150,35 +1229,10 @@ region_df %>%
               mean_diff = mean(causal_effect_ratio_diff), 
               lower_diff = quantile(causal_effect_ratio_diff, 0.025), 
               upper_diff = quantile(causal_effect_ratio_diff, 0.975),
-              pr_south_greater = mean(`South` > `Non-south`))
+              pr_south_greater = mean(`South` > `Non-south`)) -> pr_south_greater
 
-#### Region bar plot
-region_df <- all_samples %>% 
-  filter(type == "total") %>% 
-  filter(!state %in% c("Ban States", "Ban States (excl. Texas)", "Unexposed States")) %>% 
-  mutate(region = ifelse(state %in% c("Wisconsin", "South Dakota", "Idaho", "Missouri"), "Non-south", "South"))
-
-region_df %>% 
-  filter(exposure_code == 1) %>% 
-  ## Aggregate over south and nonsouth
-  group_by(type, category, .draw, state, region) %>% 
-      summarise(deaths := sum(deaths), 
-                denom = sum(deaths), 
-                ypred=sum(ypred), 
-                mu = log(sum(exp(mu))),
-                mu_treated = log(sum(exp(mu_treated)))) %>% 
-                ungroup() %>%
-        filter(category == "Total") %>%
-        mutate(causal_effect_ratio = 100*(exp(mu_treated) / exp(mu)-1)) %>%
-        arrange(region, state) %>% group_by(state, region) %>%
-        summarize(causal_effect_ratio = median(causal_effect_ratio)) %>% 
-        left_join(cov_dat, by="state") %>%
-        mutate(state = factor(state), region=factor(region)) %>%
-        ggplot(aes(x=fct_reorder(state, median_time_post_dobbs), y=causal_effect_ratio)) + geom_col(aes(fill=region)) + 
-        ylab("Causal Effect") + xlab("State")
-                
-
-
+write_lines("------ Posterior Prob Southern vs Non-Southern States ------- ", "figs/main_figures/summaries_for_paper.txt", append=TRUE)
+write_lines(capture.output(print(pr_south_greater)), "figs/main_figures/summaries_for_paper.txt", append=TRUE)
 
 ## Compute Effect Differences for NH White vs Non-White
 race_df <- all_samples %>% filter(!state %in% c("Ban States", "Ban States (excl. Texas)", "Unexposed States")) %>% 
@@ -1210,15 +1264,16 @@ race_df %>%
       causal_effect_ratio = treated_rate / untreated_rate
     ) %>% pivot_wider(names_from = black, values_from = c(causal_effect_ratio), id_cols=c(.draw)) %>% 
     mutate(causal_effect_ratio_diff = nonblack - black) %>% ungroup() %>%
-    summarize(mean_rate_white = mean(black), mean_rate_nonblack = mean(nonblack),
+    summarize(mean_rate_black = mean(black), mean_rate_nonblack = mean(nonblack),
               mean_diff = mean(causal_effect_ratio_diff), 
               lower_diff = quantile(causal_effect_ratio_diff, 0.025), 
               upper_diff = quantile(causal_effect_ratio_diff, 0.975),
-              pr_nonblack_greater = mean(black > nonblack))
+              pr_black_greater = mean(black > nonblack)) -> pr_black_greater
 
+write_lines("------ Posterior Prob NH Black vs Non-Black ------- ", "figs/main_figures/summaries_for_paper.txt", append=TRUE)
+write_lines(capture.output(print(pr_black_greater)), "figs/main_figures/summaries_for_paper.txt", append=TRUE)
 
-  
-## Compute Effect Differences for NH White vs Non-White
+## Compute Effect Differences for Congenital vs noncongenital
 con_df <- all_samples %>% filter(!state %in% c("Ban States", "Ban States (excl. Texas)", "Unexposed States")) %>% 
       filter(type == "congenital") %>% 
       filter(exposure_code == 1) %>%
@@ -1250,12 +1305,19 @@ con_df %>%
               mean_diff = mean(causal_effect_ratio_diff), 
               lower_diff = quantile(causal_effect_ratio_diff, 0.025), 
               upper_diff = quantile(causal_effect_ratio_diff, 0.975),
-              pr_con_greater = mean(Congenital > `Non-congenital`))
+              pr_con_greater = mean(Congenital > `Non-congenital`)) -> pr_con_greater
 
+write_lines("------ Posterior Prob Congenital vs Non-Congenital ------- ", "figs/main_figures/summaries_for_paper.txt", append=TRUE)
+write_lines(capture.output(print(pr_con_greater)), "figs/main_figures/summaries_for_paper.txt", append=TRUE)
 
-all_samples %>% filter(.draw == 1, ban == 1, time %in% c("2019-07-01", "2019-01-01"), type == "total") %>% 
+## Infant mortality rate in 2019 for Ban STates
+infant_mortality_rate_2019 <- all_samples %>% filter(.draw == 1, ban == 1, time %in% c("2019-07-01", "2019-01-01"), type == "total") %>% 
 filter(!(state %in% c("Ban States", "Ban States (excl. Texas)"))) %>% 
-select(state, mu, births) %>% mutate(expected_deaths = exp(mu)) %>% summarize(sum(expected_deaths)/sum(births)*1000)
+select(state, mu, births) %>% mutate(expected_deaths = exp(mu)) %>% summarize(sum(expected_deaths)/sum(births)*1000) 
+
+write_lines(sprintf("------ 2019 Infant Mortality Rate is %f ------- ", as.numeric(infant_mortality_rate_2019)), 
+            "figs/main_figures/summaries_for_paper.txt", append=TRUE)
+
 
 ```
 
