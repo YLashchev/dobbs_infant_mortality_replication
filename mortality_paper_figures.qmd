@@ -1140,8 +1140,17 @@ write_lines(sprintf("corr = %f, pval = %f", cor_test$estimate, cor_test$p.value)
 
 all_samples %>% filter(!is.na(te), exposure_code == 1) %>% group_by(state, time, category) %>% summarize(es=coda::effectiveSize(te)) %>% pull(es) %>% quantile(., c(0.025, 0.5, 0.975))
 
+# all_samples %>% filter(type=="total", exposure_code == 1) %>% select(K, D, N, .chain, .iteration, te, category) %>%
+#   group_by(K, D, N, category) %>% map(~ pivot_wider(.x, names_from=".chain", values_from="te"))
+
+
+
+
 ## Trace plots.
 all_samples %>% filter(exposure_code == 1, time=="2023-01-01") %>% filter(.chain %in% c(1,2)) %>% ggplot(aes(x=.iteration, y=te)) + geom_line(aes(color=as.factor(.chain)), alpha=0.5) + facet_wrap(~category) + theme_bw()
+
+
+
 
 ## Post-Hoc IMR for those who would have received abortion but did not
 ## 478 excess deaths
