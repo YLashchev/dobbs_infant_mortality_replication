@@ -48,22 +48,10 @@ def main(dist, outcome_type="births", cat_name="total", rank=5, normalize_deaths
         # Only use data from 2012 onwards if not using a placebo time #
         df = df[df['time'] >= pd.to_datetime('2012-01-01')]  
 
-    ## Temporary
-    # df = df[df['time'] <= pd.to_datetime('2023-06-01')]
-    ## Temporary, drop Texas as sensitivity
-    ## df = df[df['state'] != 'Texas']
-
-
     data_dict_cat = prep_data(df, outcome_type=outcome_type, group=cat_name)
 
     if(~normalize_deaths):
         data_dict_cat['denominators'] = np.ones(data_dict_cat['denominators'].shape)
-    
-    data_dict_cat['control_idx_array']
-
-    data_dict_cat['variables']
-    
-    data_dict_cat['residual_cat_mask_idx_array'].shape
 
     from jax import random
     from numpyro.infer import MCMC, NUTS, Predictive
