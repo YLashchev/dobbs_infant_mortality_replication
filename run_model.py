@@ -23,11 +23,13 @@ model_treated = True
 dobbs_donor_sensitivity = False
 placebo_time = None
 placebo_state = None
-num_chains = 1
+num_chains = 4
+thinning=2
+end_date = '2024-01-01'
 def main(dist, outcome_type="births", cat_name="total", rank=5, normalize_deaths=True, missingness=True, 
          disp_param=1e-4, sample_disp=False, placebo_state = None, placebo_time = None, 
          end_date = '2024-01-01', dobbs_donor_sensitivity=False, model_treated=False, results_file_suffix = "",
-         num_chains=num_chains, num_warmup=1000, num_samples=1000):
+         num_chains=num_chains, num_warmup=1000, num_samples=1000, thinning=1):
     
     numpyro.set_host_device_count(num_chains)
     
@@ -69,7 +71,8 @@ def main(dist, outcome_type="births", cat_name="total", rank=5, normalize_deaths
         num_warmup=num_warmup,
         num_samples=num_samples,
         num_chains=num_chains,
-        progress_bar=True
+        progress_bar=True,
+        thinning=thinning
     )
 
     mcmc.run(
@@ -104,7 +107,7 @@ def main(dist, outcome_type="births", cat_name="total", rank=5, normalize_deaths
         model_treated = False
     )['y_obs']
     K, D, N = data_dict_cat['denominators'].shape
-    pred_mat = predictions.reshape(mcmc.num_chains, mcmc.num_samples, K, D, N)
+    pred_mat = predictions.reshape(mcmc.num_chains, int(mcmc.num_samples/mcmc.thinning), K, D, N)
    
     ## Take Python output and convert to draws matrix form
     params = dict_to_tidybayes({'mu': samples['mu_ctrl'], 'te': samples['te'], 'disp' : samples['disp'], 'state_te' : samples['state_treatment_effect'], 'category_te' : samples['category_treatment_effect'], 'unit_weights' : samples['unit_weight'], 'latent_factors' : samples['time_fac']})
@@ -159,5 +162,5 @@ if __name__ == '__main__':
                                                 sample_disp=sample_disp, placebo_state=i[5], placebo_time = i[6], 
                                                 end_date=end_date, dobbs_donor_sensitivity=dobbs_donor_sensitivity, 
                                                 results_file_suffix="main_analysis",
-                                                model_treated=True, num_chains=4, num_samples=250, num_warmup=1000) for i in args)
+                                                model_treated=True, num_chains=4, num_samples=2500, thinning=10, num_warmup=1000) for i in args)
     
