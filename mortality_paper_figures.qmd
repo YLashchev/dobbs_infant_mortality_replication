@@ -27,7 +27,7 @@ suffix <- "main_analysis"
 fig_suffix <- ""
 
 df <- read_csv(sprintf("results/df_%s.csv", suffix))
-aggregations <- read_csv("data/dobbs_aggregate_data.csv")
+aggregations <- read_csv("data/dobbs_biannual_aggragtions.csv")
 
 df$time <- paste(df$year, df$bacode * 6 - 5, "01", sep="-") %>% ymd()
 aggregations$time <- paste(aggregations$year, aggregations$bacode * 6 - 5, "01", sep="-") %>% ymd()
@@ -1329,4 +1329,3 @@ write_lines(sprintf("------ 2019 Infant Mortality Rate is %f ------- ", as.numer
 
 
 ```
-

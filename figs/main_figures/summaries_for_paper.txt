@@ -1,0 +1,21 @@
+------ Correlation between inferred pct increase in fertility with inferred pct increase in mortality  ------ 
+corr = 0.765323, pval = 0.001423
+------ 478 deaths over expectation divided by 20323 births over expectation * 1000 = 23.520150 Infant Mortality Rate for those seeking abortion who did not get one ------ 
+------ Posterior Prob Southern vs Non-Southern States ------- 
+# A tibble: 1 × 6
+  mean_rate_south mean_rate_nonsouth mean_diff lower_diff upper_diff
+            <dbl>              <dbl>     <dbl>      <dbl>      <dbl>
+1            1.09               1.00    0.0827     0.0182      0.150
+# ℹ 1 more variable: pr_south_greater <dbl>
+------ Posterior Prob NH Black vs Non-Black ------- 
+# A tibble: 1 × 6
+  mean_rate_black mean_rate_nonblack mean_diff lower_diff upper_diff
+            <dbl>              <dbl>     <dbl>      <dbl>      <dbl>
+1            1.10               1.06   -0.0440     -0.113     0.0136
+# ℹ 1 more variable: pr_black_greater <dbl>
+------ Posterior Prob Congenital vs Non-Congenital ------- 
+# A tibble: 1 × 6
+  mean_rate_con mean_rate_noncon mean_diff lower_diff upper_diff pr_con_greater
+          <dbl>            <dbl>     <dbl>      <dbl>      <dbl>          <dbl>
+1          1.11             1.05    0.0670   -0.00597      0.151          0.954
+------ 2019 Infant Mortality Rate is 6.269624 ------- 

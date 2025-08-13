@@ -33,8 +33,8 @@ def main(dist, outcome_type="births", cat_name="total", rank=5, normalize_deaths
     
     numpyro.set_host_device_count(num_chains)
     
-    df = pd.read_csv('data/dobbsbiannualbirthsdeaths_11_08_24.csv')
-    # df = pd.read_csv('data/dobbs_biannual_data.csv')
+    # df = pd.read_csv('data/dobbsbiannualbirthsdeaths_11_08_24.csv')
+    df = pd.read_csv('data/dobbs_biannual_data.csv')
     
     from clean_birth_data import prep_data, clean_dataframe, create_unit_placebo_dataset, create_time_placebo_dataset
     
@@ -163,4 +163,3 @@ if __name__ == '__main__':
                                                 end_date=end_date, dobbs_donor_sensitivity=dobbs_donor_sensitivity, 
                                                 results_file_suffix="main_analysis",
                                                 model_treated=True, num_chains=4, num_samples=2500, thinning=10, num_warmup=1000) for i in args)
-    

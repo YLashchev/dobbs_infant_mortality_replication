@@ -1,0 +1,13 @@
+# Gitignore for dobbs_infant_mortality project
+
+# Python specific ignores
+__pycache__/
+*.pyc
+.env
+venv/
+TRUE
+
+# R specific ignores
+.Rhistory
+.Rdata
+.Rproj.user/
