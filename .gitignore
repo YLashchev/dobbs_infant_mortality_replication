@@ -5,7 +5,6 @@ __pycache__/
 *.pyc
 .env
 venv/
-TRUE
 
 # R specific ignores
 .Rhistory
